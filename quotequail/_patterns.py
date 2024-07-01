@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-
 import re
-from typing import List
 
 REPLY_PATTERNS = [
     "^On (.*) wrote:$",  # apple mail/gmail reply
@@ -14,7 +11,9 @@ REPLY_PATTERNS = [
     "([0-9]{4}/[0-9]{1,2}/[0-9]{1,2}) (.* <.*@.*>)$",  # gmail (?) reply
 ]
 
-REPLY_DATE_SPLIT_REGEX = re.compile(r"^(.*(:[0-9]{2}( [apAP]\.?[mM]\.?)?)), (.*)?$")
+REPLY_DATE_SPLIT_REGEX = re.compile(
+    r"^(.*(:[0-9]{2}( [apAP]\.?[mM]\.?)?)), (.*)?$"
+)
 
 FORWARD_MESSAGES = [
     # apple mail forward
@@ -42,15 +41,23 @@ FORWARD_LINE = "________________________________"
 
 FORWARD_PATTERNS = (
     [
-        "^{}$".format(FORWARD_LINE),
+        f"^{FORWARD_LINE}$",
     ]
     + [f"^---+ ?{p} ?---+$" for p in FORWARD_MESSAGES]
     + [f"^{p}:$" for p in FORWARD_MESSAGES]
 )
 
 FORWARD_STYLES = [
-    # Outlook
-    "border:none;border-top:solid #B5C4DF 1.0pt;padding:3.0pt 0in 0in 0in",
+    # Outlook starts forwards directly with the "From: " line but we can catch
+    # it with the header to avoid falsely identifying a forward
+    # - #B5C4DF and #E1E1E1 are known border colors.
+    # - "padding:3.0pt 0in 0in 0in" and "padding:3.0pt 0cm 0cm 0cm" are known
+    #   paddings.
+    re.compile(
+        r"^border:none;border-top:solid #[0-9a-fA-f]{6} 1\.0pt;"
+        r"padding:3\.0pt 0(in|cm) 0(in|cm) 0(in|cm)$",
+        re.UNICODE,
+    ),
 ]
 
 HEADER_RE = re.compile(r"\*?([-\w ]+):\*?(.*)$", re.UNICODE)
@@ -101,7 +108,11 @@ COMPILED_PATTERN_MAP = {
     "forward": [re.compile(regex) for regex in FORWARD_PATTERNS],
 }
 
-COMPILED_PATTERNS: List[re.Pattern] = sum(COMPILED_PATTERN_MAP.values(), [])
+COMPILED_PATTERNS: list[re.Pattern] = [
+    pattern
+    for patterns in COMPILED_PATTERN_MAP.values()
+    for pattern in patterns
+]
 
 MULTIPLE_WHITESPACE_RE = re.compile(r"\s+")
 

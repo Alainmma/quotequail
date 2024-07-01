@@ -1,9 +1,24 @@
 # HTML utils
+import enum
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, TypeAlias
 
 import lxml.etree
 import lxml.html
 
+if TYPE_CHECKING:
+    from lxml.html import HtmlElement
+
 from ._patterns import FORWARD_LINE, FORWARD_STYLES, MULTIPLE_WHITESPACE_RE
+
+
+class Position(enum.Enum):
+    Begin = "begin"
+    End = "end"
+
+
+Element: TypeAlias = "HtmlElement"
+ElementRef = tuple["Element", Position]
 
 INLINE_TAGS = [
     "a",
@@ -23,11 +38,8 @@ INLINE_TAGS = [
     "th",
 ]
 
-BEGIN = "begin"
-END = "end"
 
-
-def trim_tree_after(element, include_element=True):
+def trim_tree_after(element: Element, include_element: bool = True):
     """
     Remove the document tree following the given element. If include_element
     is True, the given element is kept in the tree, otherwise it is removed.
@@ -44,7 +56,9 @@ def trim_tree_after(element, include_element=True):
         el = parent_el
 
 
-def trim_tree_before(element, include_element=True, keep_head=True):
+def trim_tree_before(
+    element: Element, include_element: bool = True, keep_head: bool = True
+) -> None:
     """
     Remove the document tree preceding the given element. If include_element
     is True, the given element is kept in the tree, otherwise it is removed.
@@ -66,7 +80,9 @@ def trim_tree_before(element, include_element=True, keep_head=True):
         el = parent_el
 
 
-def trim_slice(lines, slice_tuple):
+def trim_slice(
+    lines: list[str], slice_tuple: tuple[int | None, int | None] | None
+) -> tuple[int, int] | None:
     """
     Trim a slice tuple (begin, end) so it starts at the first non-empty line
     (obtained via indented_tree_line_generator / get_line_info) and ends at the
@@ -97,7 +113,7 @@ def trim_slice(lines, slice_tuple):
     return (slice_start, slice_end)
 
 
-def unindent_tree(element):
+def unindent_tree(element: Element) -> None:
     """
     Remove the outermost indent. For example, the tree
     "<div>A<blockqote>B<div>C<blockquote>D</blockquote>E</div>F</blockquote>G</div>"
@@ -111,7 +127,13 @@ def unindent_tree(element):
             return
 
 
-def slice_tree(tree, start_refs, end_refs, slice_tuple, html_copy=None):
+def slice_tree(
+    tree: Element,
+    start_refs: list[ElementRef | None],
+    end_refs: list[ElementRef | None],
+    slice_tuple: tuple[int | None, int | None] | None,
+    html_copy: str | None = None,
+):
     """
     Slice the HTML tree with the given start_refs and end_refs (obtained via
     get_line_info) at the given slice_tuple, a tuple (start, end) containing
@@ -165,10 +187,8 @@ def slice_tree(tree, start_refs, end_refs, slice_tuple, html_copy=None):
     else:
         new_tree = tree
 
-    if start_ref:
-        include_start = start_ref[1] == BEGIN
-    if end_ref:
-        include_end = end_ref[1] == END
+    include_start = start_ref[1] is Position.Begin if start_ref else False
+    include_end = end_ref[1] is Position.End if end_ref else False
 
     # If start_ref is the same as end_ref, and we don't include the element,
     # we are removing the entire tree. We need to handle this separately,
@@ -190,7 +210,7 @@ def slice_tree(tree, start_refs, end_refs, slice_tuple, html_copy=None):
     return new_tree
 
 
-def get_html_tree(html):
+def get_html_tree(html: str) -> Element:
     """
     Given the HTML string, returns a LXML tree object. The tree is wrapped in
     <div> elements if it doesn't have a top level tag or parsing would
@@ -198,10 +218,10 @@ def get_html_tree(html):
     strip_wrapping().
     """
     parser = lxml.html.HTMLParser(encoding="utf-8")
-    html = html.encode("utf8")
+    htmlb = html.encode("utf8")
 
     try:
-        tree = lxml.html.fromstring(html, parser=parser)
+        tree = lxml.html.fromstring(htmlb, parser=parser)
     except lxml.etree.Error:
         # E.g. empty document. Use dummy <div>
         tree = lxml.html.fromstring("<div></div>")
@@ -209,8 +229,8 @@ def get_html_tree(html):
     # If the document doesn't start with a top level tag, wrap it with a <div>
     # that will be later stripped out for consistent behavior.
     if tree.tag not in lxml.html.defs.top_level_tags:
-        html = b"<div>" + html + b"</div>"
-        tree = lxml.html.fromstring(html, parser=parser)
+        htmlb = b"<div>" + htmlb + b"</div>"
+        tree = lxml.html.fromstring(htmlb, parser=parser)
 
     # HACK for Outlook emails, where tags like <o:p> are rendered as <p>. We
     # can generally ignore these tags so we replace them with <span>, which
@@ -220,7 +240,7 @@ def get_html_tree(html):
     for el in tree.iter():
         if el.nsmap or (isinstance(el.tag, str) and ":" in el.tag):
             if el.nsmap:
-                actual_tag_name = "{}:{}".format(list(el.nsmap.keys())[0], el.tag)
+                actual_tag_name = f"{next(iter(el.nsmap.keys()))}:{el.tag}"
             else:
                 actual_tag_name = el.tag
             el.tag = "span"
@@ -229,7 +249,7 @@ def get_html_tree(html):
     return tree
 
 
-def strip_wrapping(html):
+def strip_wrapping(html: str) -> str:
     """
     Remove the wrapping that might have resulted when using get_html_tree().
     """
@@ -238,7 +258,7 @@ def strip_wrapping(html):
     return html.strip()
 
 
-def render_html_tree(tree):
+def render_html_tree(tree: Element) -> str:
     """
     Render the given HTML tree, and strip any wrapping that was applied in
     get_html_tree().
@@ -257,20 +277,22 @@ def render_html_tree(tree):
     return strip_wrapping(html)
 
 
-def is_indentation_element(element):
+def is_indentation_element(element: Element) -> bool:
     if isinstance(element.tag, str):
         return element.tag.lower() == "blockquote"
     return False
 
 
-def tree_token_generator(el, indentation_level=0):
+def tree_token_generator(
+    el: Element, indentation_level: int = 0
+) -> Iterator[None | tuple[Element, Position, int] | str]:
     """
     Yield tokens for the given HTML element as follows:
 
-    - A tuple (LXML element, BEGIN, indentation_level)
+    - A tuple (LXML element, Begin, indentation_level)
     - Text right after the start of the tag, or None.
     - Recursively calls the token generator for all child objects
-    - A tuple (LXML element, END, indentation_level)
+    - A tuple (LXML element, End, indentation_level)
     - Text right after the end of the tag, or None.
     """
     if not isinstance(el.tag, str):
@@ -281,7 +303,7 @@ def tree_token_generator(el, indentation_level=0):
     if is_indentation:
         indentation_level += 1
 
-    yield (el, BEGIN, indentation_level)
+    yield (el, Position.Begin, indentation_level)
 
     yield el.text
 
@@ -291,12 +313,21 @@ def tree_token_generator(el, indentation_level=0):
     if is_indentation:
         indentation_level -= 1
 
-    yield (el, END, indentation_level)
+    yield (el, Position.End, indentation_level)
 
     yield el.tail
 
 
-def tree_line_generator(el, max_lines=None):
+def tree_line_generator(
+    el: Element, max_lines: int | None = None
+) -> Iterator[
+    tuple[
+        tuple[ElementRef, Position] | None,
+        tuple[ElementRef, Position] | None,
+        int,
+        str,
+    ]
+]:
     """
     Iterate through an LXML tree and yield a tuple per line.
 
@@ -317,17 +348,17 @@ def tree_line_generator(el, max_lines=None):
 
     For example, the HTML tree "<div>foo <span>bar</span><br>baz</div>" yields:
 
-    - ((<Element div>, 'begin'), (<Element br>, 'begin'), 0, 'foo bar')
-    - ((<Element br>, 'end'), (<Element div>, 'end'), 0, 'baz').
+    - ((<Element div>, Begin), (<Element br>, Begin), 0, 'foo bar')
+    - ((<Element br>, End), (<Element div>, End), 0, 'baz').
 
     To illustrate the indentation level, the HTML tree
     '<div><blockquote>hi</blockquote>world</div>' yields:
 
-    - ((<Element blockquote>, 'begin'), (<Element blockquote>, 'end'), 1, 'hi')
-    - ((<Element blockquote>, 'end'), (<Element div>, 'end'), 0, 'world')
+    - ((<Element blockquote>, Begin), (<Element blockquote>, End), 1, 'hi')
+    - ((<Element blockquote>, End), (<Element div>, End), 0, 'world')
     """
 
-    def _trim_spaces(text):
+    def _trim_spaces(text: str) -> str:
         return MULTIPLE_WHITESPACE_RE.sub(" ", text).strip()
 
     counter = 1
@@ -341,7 +372,7 @@ def tree_line_generator(el, max_lines=None):
     start_ref = None
 
     # The indentation level at the start of the line.
-    start_indentation_level = None
+    start_indentation_level = 0
 
     for token in tree_token_generator(el):
         if token is None:
@@ -352,10 +383,13 @@ def tree_line_generator(el, max_lines=None):
 
             tag_name = el.tag.lower()
 
-            line_break = tag_name == "br" and state == BEGIN
+            line_break = tag_name == "br" and state is Position.Begin
             is_block = tag_name not in INLINE_TAGS
             is_forward = (
-                is_block and state == BEGIN and el.attrib.get("style") in FORWARD_STYLES
+                is_block
+                and state is Position.Begin
+                and (style := el.attrib.get("style"))
+                and any(style_re.match(style) for style_re in FORWARD_STYLES)
             )
 
             if is_block or line_break:
@@ -371,7 +405,12 @@ def tree_line_generator(el, max_lines=None):
 
                     if is_forward:
                         # Simulate forward
-                        yield (end_ref, end_ref, start_indentation_level, FORWARD_LINE)
+                        yield (
+                            end_ref,
+                            end_ref,
+                            start_indentation_level,
+                            FORWARD_LINE,
+                        )
                         counter += 1
                         if max_lines is not None and counter > max_lines:
                             return
@@ -384,14 +423,20 @@ def tree_line_generator(el, max_lines=None):
             line += token
 
         else:
-            raise RuntimeError("invalid token: {}".format(token))
+            raise RuntimeError(f"invalid token: {token}")
 
+    # TODO: wrong type, would trigger error if reached. investigate if we can
+    # remove this or if it needs fixing.
+    """
     line = _trim_spaces(line)
     if line:
         yield line
+    """
 
 
-def indented_tree_line_generator(el, max_lines=None):
+def indented_tree_line_generator(
+    el: Element, max_lines: int | None = None
+) -> Iterator[tuple[ElementRef | None, ElementRef | None, str]]:
     r"""
     Like tree_line_generator, but yields tuples (start_ref, end_ref, line),
     where the line already takes the indentation into account by having "> "
@@ -402,20 +447,23 @@ def indented_tree_line_generator(el, max_lines=None):
     gen = tree_line_generator(el, max_lines)
     for start_ref, end_ref, indentation_level, line in gen:
         # Escape line
-        if line.startswith(">"):
-            line = "\\" + line
-        yield start_ref, end_ref, "> " * indentation_level + line
+        full_line = "\\" + line if line.startswith(">") else line
+        yield start_ref, end_ref, "> " * indentation_level + full_line
 
 
-def get_line_info(tree, max_lines=None):
+def get_line_info(
+    tree: Element, max_lines: int | None = None
+) -> tuple[list[ElementRef | None], list[ElementRef | None], list[str]]:
     """
     Shortcut for indented_tree_line_generator() that returns an array of
     start references, an array of corresponding end references (see
     tree_line_generator() docs), and an array of corresponding lines.
     """
     line_gen = indented_tree_line_generator(tree, max_lines=max_lines)
-    line_gen_result = list(zip(*line_gen))
+    line_gen_result: (
+        tuple[list[ElementRef | None], list[ElementRef | None], list[str]]
+        | tuple[()]
+    ) = tuple(zip(*line_gen))
     if line_gen_result:
         return line_gen_result
-    else:
-        return [], [], []
+    return [], [], []
